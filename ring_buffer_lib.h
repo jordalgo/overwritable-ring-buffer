@@ -13,9 +13,9 @@ typedef struct {
     bitset_t populated;
     int consumer_pos;
     int producer_pos;
-    void * consumer_ptr;
-    void * producer_ptr;
-    void * buf;
+    char * consumer_ptr;
+    char * producer_ptr;
+    char * buf;
 } rng_buf_t;
 
 typedef struct {
