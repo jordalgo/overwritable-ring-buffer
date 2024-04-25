@@ -6,6 +6,7 @@ typedef struct {
 typedef struct {
     int entries;
     size_t entry_size;
+    // todo: remove these in favor of counting the bits in consumed/populated
     int nr_can_consume;
     int nr_available;
     bitset_t consumed;

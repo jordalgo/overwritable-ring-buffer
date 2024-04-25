@@ -11,10 +11,23 @@ typedef struct {
   unsigned long b;
 } ds_t;
 
+typedef struct {
+    char comm[16];
+    unsigned long pid;
+    unsigned long tid;
+} task_t;
 
 void debug_rb_ds(rng_buf_t * rng_buf) {
     for (int i = 0; i < rng_buf->entries; ++i) {
         printf("entry idx %d. A: %d B: %lu\n", i, ((ds_t *)rng_buf->buf + i)->a, ((ds_t *)rng_buf->buf + i)->b);
+    }
+    printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
+    printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
+}
+
+void debug_rb_task(rng_buf_t * rng_buf) {
+    for (int i = 0; i < rng_buf->entries; ++i) {
+        printf("entry idx %d. comm: %s pid: %lu tid: %lu\n", i, ((task_t *)rng_buf->buf + i)->comm, ((task_t *)rng_buf->buf + i)->pid, ((task_t *)rng_buf->buf + i)->tid);
     }
     printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
     printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
@@ -57,6 +70,22 @@ void test_basic()
     assert(c_item3.ds == NULL);
     
     destroy_ring_buf(&rng_buf);
+    
+    init_ring_buf(&rng_buf, 5, sizeof(task_t));
+    
+    task_t task1;
+    task1.pid = 30;
+    task1.tid = 10;
+    
+    char comm[16] = "tomato";
+    memcpy(task1.comm, comm, sizeof(comm));
+    
+    assert(publish(&rng_buf, &task1) == 0);
+    c_item = consume(&rng_buf);
+    assert(c_item.ds != NULL);
+    assert(strcmp(((task_t *)c_item.ds)->comm, task1.comm) == 0);
+    assert(((task_t *)c_item.ds)->pid == 30);
+    assert(((task_t *)c_item.ds)->tid == 10);
 }
 
 void test_2()
@@ -135,6 +164,8 @@ void test_3()
     entry_t c_item2 = consume(&rng_buf);
     entry_t c_item3 = consume(&rng_buf);
     
+    // state: [(1, 2), (3, 4), (5, 6)]
+    
     // Nothing can be consumed or published
     assert(publish(&rng_buf, &item4) == -1);
     entry_t c_item4 = consume(&rng_buf);
@@ -144,11 +175,11 @@ void test_3()
     release(&rng_buf, &c_item2);
     release(&rng_buf, &c_item3);
     
-    // state: [[1, 2], [-, -], [-, -]]
+    // state: [(1, 2), [-, -], [-, -]]
     
     assert(publish(&rng_buf, &item4) == 0);
     
-    // state: [[1, 2], [6, 7], [-, -]]
+    // state: [(1, 2), [6, 7], [-, -]]
 
     c_item4 = consume(&rng_buf);
     assert(c_item4.ds != NULL);
@@ -156,25 +187,27 @@ void test_3()
     assert(((ds_t *)c_item4.ds)->b == 7);
     release(&rng_buf, &c_item4);
     
-    // state: [[1, 2], [-, -], [-, -]]
+    // state: [(1, 2), [-, -], [-, -]]
     
     assert(publish(&rng_buf, &item2) == 0);
     
-    // state: [[1, 2], [-, -], [3, 4]]
+    // state: [(1, 2), [-, -], [3, 4]]
     
     assert(publish(&rng_buf, &item1) == 0);
     
-    // state: [[1, 2], [1, 2], [3, 4]]
+    // state: [(1, 2), [1, 2], [3, 4]]
     
     assert(publish(&rng_buf, &item1) == 0);
     
-    // state: [[1, 2], [1, 2], [1, 2]]
+    // state: [(1, 2), [1, 2], [1, 2]]
     
     assert(publish(&rng_buf, &item4) == 0);
     
-    // state: [[1, 2], [6, 7], [1, 2]]
+    // state: [(1, 2), [6, 7], [1, 2]]
     
     // Following the sequence above the 3rd slot (holding [1, 2]) is the oldest
+    // for the available slots. The 1st slot is still being consumed and
+    // therefore not eligible.
     c_item4 = consume(&rng_buf);
     assert(c_item4.ds != NULL);
     assert(((ds_t *)c_item4.ds)->a == 1);
