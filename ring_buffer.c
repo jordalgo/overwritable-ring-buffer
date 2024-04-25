@@ -6,20 +6,34 @@
 #include <time.h>
 #include "ring_buffer_lib.h"
 
+typedef struct {
+  int a;
+  unsigned long b;
+} ds_t;
+
+
+void debug_rb_ds(rng_buf_t * rng_buf) {
+    for (int i = 0; i < rng_buf->entries; ++i) {
+        printf("entry idx %d. A: %d B: %lu\n", i, ((ds_t *)rng_buf->buf + i)->a, ((ds_t *)rng_buf->buf + i)->b);
+    }
+    printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
+    printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
+}
+
 void test_basic()
 {
-    struct rng_buf rng_buf;
-    init_ring_buf(&rng_buf, 3);
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    struct ds item1;
+    ds_t item1;
     item1.a = 1;
     item1.b = 2;
     
-    struct ds item2;
+    ds_t item2;
     item2.a = 3;
     item2.b = 4;
     
-    struct ds item3;
+    ds_t item3;
     item3.a = 5;
     item3.b = 6;
     
@@ -29,38 +43,40 @@ void test_basic()
     assert(publish(&rng_buf, &item1) == 0);
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 1);
-    assert(c_item.ds->b == 2);
+    assert(((ds_t *)c_item.ds)->a == 1);
+    assert(((ds_t *)c_item.ds)->b == 2);
     
     publish(&rng_buf, &item2);
     
     entry_t c_item2 = consume(&rng_buf);
     assert(c_item2.ds != NULL);
-    assert(c_item2.ds->a == 3);
-    assert(c_item2.ds->b == 4);
-    
+    assert(((ds_t *)c_item2.ds)->a == 3);
+    assert(((ds_t *)c_item2.ds)->b == 4);
+
     entry_t c_item3 = consume(&rng_buf);
     assert(c_item3.ds == NULL);
+    
+    destroy_ring_buf(&rng_buf);
 }
 
 void test_2()
 {
-    struct rng_buf rng_buf;
-    init_ring_buf(&rng_buf, 3);
-    
-    struct ds item1;
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(ds_t));
+ 
+    ds_t item1;   
     item1.a = 1;
     item1.b = 2;
     
-    struct ds item2;
+    ds_t item2;
     item2.a = 3;
     item2.b = 4;
     
-    struct ds item3;
+    ds_t item3;
     item3.a = 5;
     item3.b = 6;
     
-    struct ds item4;
+    ds_t item4;
     item4.a = 6;
     item4.b = 7;
     
@@ -73,37 +89,39 @@ void test_2()
     publish(&rng_buf, &item4);
     
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 1);
-    assert(c_item.ds->b == 2);
+    assert(((ds_t *)c_item.ds)->a == 1);
+    assert(((ds_t *)c_item.ds)->b == 2);
     
     release(&rng_buf, &c_item);
     
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 5);
-    assert(c_item.ds->b == 6);
+    assert(((ds_t *)c_item.ds)->a == 5);
+    assert(((ds_t *)c_item.ds)->b == 6);
     
     release(&rng_buf, &c_item);
+    
+    destroy_ring_buf(&rng_buf);
 }
 
 void test_3()
 {
-    struct rng_buf rng_buf;
-    init_ring_buf(&rng_buf, 3);
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    struct ds item1;
+    ds_t item1;
     item1.a = 1;
     item1.b = 2;
     
-    struct ds item2;
+    ds_t item2;
     item2.a = 3;
     item2.b = 4;
     
-    struct ds item3;
+    ds_t item3;
     item3.a = 5;
     item3.b = 6;
     
-    struct ds item4;
+    ds_t item4;
     item4.a = 6;
     item4.b = 7;
     
@@ -134,8 +152,8 @@ void test_3()
 
     c_item4 = consume(&rng_buf);
     assert(c_item4.ds != NULL);
-    assert(c_item4.ds->a == 6);
-    assert(c_item4.ds->b == 7);
+    assert(((ds_t *)c_item4.ds)->a == 6);
+    assert(((ds_t *)c_item4.ds)->b == 7);
     release(&rng_buf, &c_item4);
     
     // state: [[1, 2], [-, -], [-, -]]
@@ -159,13 +177,13 @@ void test_3()
     // Following the sequence above the 3rd slot (holding [1, 2]) is the oldest
     c_item4 = consume(&rng_buf);
     assert(c_item4.ds != NULL);
-    assert(c_item4.ds->a == 1);
-    assert(c_item4.ds->b == 2);
+    assert(((ds_t *)c_item4.ds)->a == 1);
+    assert(((ds_t *)c_item4.ds)->b == 2);
     
     entry_t c_item5 = consume(&rng_buf);
     assert(c_item5.ds != NULL);
-    assert(c_item5.ds->a == 6);
-    assert(c_item5.ds->b == 7);
+    assert(((ds_t *)c_item5.ds)->a == 6);
+    assert(((ds_t *)c_item5.ds)->b == 7);
     
     entry_t c_item6 = consume(&rng_buf);
     assert(c_item6.ds == NULL);
@@ -195,8 +213,8 @@ void test_3()
     // Following the sequence above the 2nd slot (holding [6, 7]) is the oldest
     c_item4 = consume(&rng_buf);
     assert(c_item4.ds != NULL);
-    assert(c_item4.ds->a == 6);
-    assert(c_item4.ds->b == 7);
+    assert(((ds_t *)c_item4.ds)->a == 6);
+    assert(((ds_t *)c_item4.ds)->b == 7);
     
     assert(publish(&rng_buf, &item2) == 0);
     
@@ -213,8 +231,8 @@ void test_3()
     // Following the sequence above the 1st slot (holding [1, 2]) is the oldest
     c_item5 = consume(&rng_buf);
     assert(c_item5.ds != NULL);
-    assert(c_item5.ds->a == 1);
-    assert(c_item5.ds->b == 2);
+    assert(((ds_t *)c_item5.ds)->a == 1);
+    assert(((ds_t *)c_item5.ds)->b == 2);
     
     assert(publish(&rng_buf, &item2) == 0);
     
@@ -222,8 +240,8 @@ void test_3()
     
     c_item3 = consume(&rng_buf);
     assert(c_item3.ds != NULL);
-    assert(c_item3.ds->a == 3);
-    assert(c_item3.ds->b == 4);
+    assert(((ds_t *)c_item3.ds)->a == 3);
+    assert(((ds_t *)c_item3.ds)->b == 4);
     
     // state: [(1, 2), (6, 7), (3, 4)]
     
@@ -251,28 +269,30 @@ void test_3()
     // state: [[5, 6], [6, 7], [-, -]]
     c_item2 = consume(&rng_buf);
     assert(c_item2.ds != NULL);
-    assert(c_item2.ds->a == 6);
-    assert(c_item2.ds->b == 7);
+    assert(((ds_t *)c_item2.ds)->a == 6);
+    assert(((ds_t *)c_item2.ds)->b == 7);
+    
+    destroy_ring_buf(&rng_buf);
 }
 
 void test_overwrite_ordering()
 {
-    struct rng_buf rng_buf;
-    init_ring_buf(&rng_buf, 3);
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    struct ds item1;
+    ds_t item1;
     item1.a = 1;
     item1.b = 2;
     
-    struct ds item2;
+    ds_t item2;
     item2.a = 3;
     item2.b = 4;
     
-    struct ds item3;
+    ds_t item3;
     item3.a = 5;
     item3.b = 6;
     
-    struct ds item4;
+    ds_t item4;
     item4.a = 6;
     item4.b = 7;
     
@@ -283,29 +303,31 @@ void test_overwrite_ordering()
     
     entry_t c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 3);
-    assert(c_item.ds->b == 4);
+    assert(((ds_t *)c_item.ds)->a == 3);
+    assert(((ds_t *)c_item.ds)->b == 4);
     release(&rng_buf, &c_item);
     
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 5);
-    assert(c_item.ds->b == 6);
+    assert(((ds_t *)c_item.ds)->a == 5);
+    assert(((ds_t *)c_item.ds)->b == 6);
     release(&rng_buf, &c_item);
     
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 6);
-    assert(c_item.ds->b == 7);
+    assert(((ds_t *)c_item.ds)->a == 6);
+    assert(((ds_t *)c_item.ds)->b == 7);
     release(&rng_buf, &c_item);
     
     assert(publish(&rng_buf, &item1) == 0);
     
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(c_item.ds->a == 1);
-    assert(c_item.ds->b == 2);
+    assert(((ds_t *)c_item.ds)->a == 1);
+    assert(((ds_t *)c_item.ds)->b == 2);
     release(&rng_buf, &c_item);
+    
+    destroy_ring_buf(&rng_buf);
 }
 
 int main()
@@ -313,7 +335,6 @@ int main()
     test_basic();
     test_2();
     test_3();
-    
     test_overwrite_ordering();
     
     return 0;

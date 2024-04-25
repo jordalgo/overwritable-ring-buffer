@@ -3,34 +3,31 @@ typedef struct {
   size_t num_bits;
 } bitset_t;
 
-struct rng_buf {
+typedef struct {
     int entries;
+    size_t entry_size;
     int nr_can_consume;
     int nr_available;
-    int consumer_pos;
     bitset_t consumed;
     bitset_t populated;
-    struct ds * consumer_ptr;
+    int consumer_pos;
     int producer_pos;
-    struct ds * producer_ptr;
-    struct ds * buf;
-};
-
-struct ds {
-  int a;
-  unsigned long b;
-};
+    void * consumer_ptr;
+    void * producer_ptr;
+    void * buf;
+} rng_buf_t;
 
 typedef struct {
     int consumed_idx;
-    struct ds * ds;
+    void * ds;
 } entry_t;
 
-entry_t consume(struct rng_buf * rng_buf);
+entry_t consume(rng_buf_t * rng_buf);
 
-void release(struct rng_buf * rng_buf, entry_t *entry);
+void release(rng_buf_t * rng_buf, entry_t * entry);
 
-int publish(struct rng_buf * rng_buf, struct ds * ds);
-void init_ring_buf(struct rng_buf * rng_buf, int num_entries);
+int publish(rng_buf_t * rng_buf, void * ds);
+void init_ring_buf(rng_buf_t * rng_buf, int num_entries, size_t entry_size);
+void destroy_ring_buf(rng_buf_t * rng_buf);
 // for debugging
-void debug_rb(struct rng_buf * rng_buf);
+void debug_rb(rng_buf_t * rng_buf);

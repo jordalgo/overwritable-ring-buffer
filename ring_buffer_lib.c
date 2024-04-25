@@ -42,18 +42,18 @@ int bs_unset(bitset_t *bs, size_t idx){
     return 0;
 }
 
-void advance_consumer(struct rng_buf * rng_buf)
+void advance_consumer(rng_buf_t * rng_buf)
 {
     if (rng_buf->consumer_pos == (rng_buf->entries - 1)) {
         rng_buf->consumer_pos = 0;
         rng_buf->consumer_ptr = rng_buf->buf;
     } else {
         ++rng_buf->consumer_pos;
-        ++rng_buf->consumer_ptr;
+        rng_buf->consumer_ptr += rng_buf->entry_size;
     }
 }
 
-void find_next_consumer_pos(struct rng_buf * rng_buf)
+void find_next_consumer_pos(rng_buf_t * rng_buf)
 {
     if (rng_buf->nr_can_consume == 0) {
         return;
@@ -70,18 +70,18 @@ void find_next_consumer_pos(struct rng_buf * rng_buf)
     }
 }
 
-void advance_producer(struct rng_buf * rng_buf)
+void advance_producer(rng_buf_t * rng_buf)
 {
     if (rng_buf->producer_pos == (rng_buf->entries - 1)) {
         rng_buf->producer_pos = 0;
         rng_buf->producer_ptr = rng_buf->buf;
     } else {
         ++rng_buf->producer_pos;
-        ++rng_buf->producer_ptr;
+        rng_buf->producer_ptr += rng_buf->entry_size;
     }
 }
 
-void find_next_producer_pos(struct rng_buf * rng_buf)
+void find_next_producer_pos(rng_buf_t * rng_buf)
 {
     if (rng_buf->nr_can_consume == 0) {
         return;
@@ -98,7 +98,7 @@ void find_next_producer_pos(struct rng_buf * rng_buf)
     }
 }
 
-entry_t consume(struct rng_buf * rng_buf)
+entry_t consume(rng_buf_t * rng_buf)
 {
     entry_t ret;
     
@@ -124,7 +124,7 @@ entry_t consume(struct rng_buf * rng_buf)
     return ret;
 }
 
-void release(struct rng_buf * rng_buf, entry_t *entry)
+void release(rng_buf_t * rng_buf, entry_t *entry)
 {
     bs_unset(&rng_buf->consumed, entry->consumed_idx);
     bs_unset(&rng_buf->populated, entry->consumed_idx);
@@ -137,14 +137,14 @@ void release(struct rng_buf * rng_buf, entry_t *entry)
     }
 }
 
-int publish(struct rng_buf * rng_buf, struct ds * ds)
+int publish(rng_buf_t * rng_buf, void * ds)
 {
     if (bs_is_set(&rng_buf->consumed, rng_buf->producer_pos)) {
         return -1;
     }
     
     bs_set(&rng_buf->populated, rng_buf->producer_pos);
-    memcpy(rng_buf->producer_ptr, ds, sizeof(*ds));
+    memcpy(rng_buf->producer_ptr, ds, rng_buf->entry_size);
     
     if (rng_buf->nr_available == 0) {
         find_next_consumer_pos(rng_buf);
@@ -158,10 +158,11 @@ int publish(struct rng_buf * rng_buf, struct ds * ds)
     return 0;
 }
 
-void init_ring_buf(struct rng_buf * rng_buf, int num_entries)
+void init_ring_buf(rng_buf_t * rng_buf, int num_entries, size_t entry_size)
 {
-    rng_buf->buf = (struct ds*)malloc(num_entries * sizeof(struct ds));
+    rng_buf->buf = (void *)malloc(num_entries * entry_size);
     rng_buf->entries = num_entries;
+    rng_buf->entry_size = entry_size;
     rng_buf->nr_can_consume = num_entries;
     rng_buf->nr_available = num_entries;
     rng_buf->consumer_pos = 0;
@@ -173,10 +174,7 @@ void init_ring_buf(struct rng_buf * rng_buf, int num_entries)
     rng_buf->producer_ptr = rng_buf->buf;
 }
 
-void debug_rb(struct rng_buf * rng_buf) {
-    for (int i = 0; i < rng_buf->entries; ++i) {
-        printf("entry idx %d. A: %d B: %lu\n", i, rng_buf->buf[i].a, rng_buf->buf[i].b);
-    }
-    printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
-    printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
+void destroy_ring_buf(rng_buf_t * rng_buf)
+{
+    free(rng_buf->buf);
 }
