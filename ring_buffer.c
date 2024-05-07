@@ -17,20 +17,26 @@ typedef struct {
     unsigned long tid;
 } task_t;
 
-void debug_rb_ds(rng_buf_t * rng_buf) {
-    for (int i = 0; i < rng_buf->entries; ++i) {
-        printf("entry idx %d. A: %d B: %lu\n", i, ((ds_t *)rng_buf->buf + i)->a, ((ds_t *)rng_buf->buf + i)->b);
+void print_rng_buf_state(rng_buf_t* rng_buf) {
+    int i = 0;
+    printf("Queue positions:\n");
+    for (i = 0; i < rng_buf->nr_entries; i++) {
+        printf("%d ", rng_buf->queue[i]);
     }
-    printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
-    printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
-}
-
-void debug_rb_task(rng_buf_t * rng_buf) {
-    for (int i = 0; i < rng_buf->entries; ++i) {
-        printf("entry idx %d. comm: %s pid: %lu tid: %lu\n", i, ((task_t *)rng_buf->buf + i)->comm, ((task_t *)rng_buf->buf + i)->pid, ((task_t *)rng_buf->buf + i)->tid);
+    printf("\n");
+    printf("Values:\n");
+    for (i = 0; i < rng_buf->nr_entries; i++) {
+        if (rng_buf->queue[i] == -1) {
+            printf("R ");
+        } else {
+            ds_t* ds = (ds_t*)&rng_buf->buf[rng_buf->queue[i] * rng_buf->entry_size];
+            printf("%d ", ds->a);
+        }
     }
-    printf("consumer_pos: %d, producer_pos: %d\n", rng_buf->consumer_pos, rng_buf->producer_pos);
-    printf("nr_can_consume: %d\n", rng_buf->nr_can_consume);
+    printf("\n");
+    printf("Producer pos %d\n", rng_buf->producer_pos);
+    printf("Consumer pos %d\n", rng_buf->consumer_pos);
+    printf("\n");
 }
 
 void test_basic()
@@ -38,274 +44,108 @@ void test_basic()
     rng_buf_t rng_buf;
     init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    ds_t item1;
-    item1.a = 1;
-    item1.b = 2;
-    
-    ds_t item2;
-    item2.a = 3;
-    item2.b = 4;
-    
-    ds_t item3;
-    item3.a = 5;
-    item3.b = 6;
-    
     entry_t c_item = consume(&rng_buf);
     assert(c_item.ds == NULL);
     
-    assert(publish(&rng_buf, &item1) == 0);
+    entry_t p_item = reserve(&rng_buf);
+    assert(p_item.ds != NULL);
+    
+    c_item = consume(&rng_buf);
+    assert(c_item.ds == NULL);
+    
+    ((ds_t*)p_item.ds)->a = -1;
+    ((ds_t*)p_item.ds)->b = 1;
+    
+    commit(&rng_buf, &p_item);
+    assert(p_item.ds == NULL);
+    
     c_item = consume(&rng_buf);
     assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 1);
-    assert(((ds_t *)c_item.ds)->b == 2);
-    
-    publish(&rng_buf, &item2);
-    
-    entry_t c_item2 = consume(&rng_buf);
-    assert(c_item2.ds != NULL);
-    assert(((ds_t *)c_item2.ds)->a == 3);
-    assert(((ds_t *)c_item2.ds)->b == 4);
+    assert(((ds_t*)c_item.ds)->a == -1);
+    assert(((ds_t*)c_item.ds)->b == 1);
 
-    entry_t c_item3 = consume(&rng_buf);
-    assert(c_item3.ds == NULL);
-    
-    destroy_ring_buf(&rng_buf);
-    
-    init_ring_buf(&rng_buf, 5, sizeof(task_t));
-    
-    task_t task1;
-    task1.pid = 30;
-    task1.tid = 10;
-    
-    char comm[16] = "tomato";
-    memcpy(task1.comm, comm, sizeof(comm));
-    
-    assert(publish(&rng_buf, &task1) == 0);
-    c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(strcmp(((task_t *)c_item.ds)->comm, task1.comm) == 0);
-    assert(((task_t *)c_item.ds)->pid == 30);
-    assert(((task_t *)c_item.ds)->tid == 10);
+    release(&rng_buf, &c_item);
+    assert(c_item.ds == NULL);
 }
 
-void test_2()
+void test_commit_ordering()
 {
     rng_buf_t rng_buf;
     init_ring_buf(&rng_buf, 3, sizeof(ds_t));
- 
-    ds_t item1;   
-    item1.a = 1;
-    item1.b = 2;
     
-    ds_t item2;
-    item2.a = 3;
-    item2.b = 4;
+    entry_t p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.ds)->a = -1;
+    ((ds_t*)p_item1.ds)->b = 1;
     
-    ds_t item3;
-    item3.a = 5;
-    item3.b = 6;
+    entry_t p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.ds)->a = -2;
+    ((ds_t*)p_item2.ds)->b = 2;
     
-    ds_t item4;
-    item4.a = 6;
-    item4.b = 7;
+    entry_t p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.ds)->a = -3;
+    ((ds_t*)p_item3.ds)->b = 3;
     
-    publish(&rng_buf, &item1);
-    publish(&rng_buf, &item2);
-    publish(&rng_buf, &item3);
+    entry_t p_item4 = reserve(&rng_buf);
+    assert(p_item4.ds == NULL);
+    
+    commit(&rng_buf, &p_item3);
+    commit(&rng_buf, &p_item2);
     
     entry_t c_item = consume(&rng_buf);
-    
-    publish(&rng_buf, &item4);
-    
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 1);
-    assert(((ds_t *)c_item.ds)->b == 2);
-    
+    assert(((ds_t*)c_item.ds)->a == -3);
+    assert(((ds_t*)c_item.ds)->b == 3);
     release(&rng_buf, &c_item);
     
     c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 5);
-    assert(((ds_t *)c_item.ds)->b == 6);
-    
+    assert(((ds_t*)c_item.ds)->a == -2);
+    assert(((ds_t*)c_item.ds)->b == 2);
     release(&rng_buf, &c_item);
     
-    destroy_ring_buf(&rng_buf);
+    c_item = consume(&rng_buf);
+    assert(c_item.ds == NULL);
+    
+    commit(&rng_buf, &p_item1);
+    
+    c_item = consume(&rng_buf);
+    assert(((ds_t*)c_item.ds)->a == -1);
+    assert(((ds_t*)c_item.ds)->b == 1);
+    release(&rng_buf, &c_item);
+    
+    c_item = consume(&rng_buf);
+    assert(c_item.ds == NULL);
 }
 
-void test_3()
+void test_reserve()
 {
     rng_buf_t rng_buf;
     init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    ds_t item1;
-    item1.a = 1;
-    item1.b = 2;
+    entry_t p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.ds)->a = -1;
+    ((ds_t*)p_item1.ds)->b = 1;
     
-    ds_t item2;
-    item2.a = 3;
-    item2.b = 4;
+    entry_t p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.ds)->a = -2;
+    ((ds_t*)p_item2.ds)->b = 2;
     
-    ds_t item3;
-    item3.a = 5;
-    item3.b = 6;
+    entry_t p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.ds)->a = -3;
+    ((ds_t*)p_item3.ds)->b = 3;
     
-    ds_t item4;
-    item4.a = 6;
-    item4.b = 7;
+    entry_t p_item4 = reserve(&rng_buf);
+    assert(p_item4.ds == NULL);
     
-    assert(publish(&rng_buf, &item1) == 0);
-    assert(publish(&rng_buf, &item2) == 0);
-    assert(publish(&rng_buf, &item3) == 0);
-    
-    // state: [[1, 2], [3, 4], [5, 6]]
+    commit(&rng_buf, &p_item1);
+    commit(&rng_buf, &p_item2);
     
     entry_t c_item1 = consume(&rng_buf);
     entry_t c_item2 = consume(&rng_buf);
+    
+    // Can't consume or reserve
     entry_t c_item3 = consume(&rng_buf);
-    
-    // state: [(1, 2), (3, 4), (5, 6)]
-    
-    // Nothing can be consumed or published
-    assert(publish(&rng_buf, &item4) == -1);
-    entry_t c_item4 = consume(&rng_buf);
-
-    assert(c_item4.ds == NULL);
-    
-    release(&rng_buf, &c_item2);
-    release(&rng_buf, &c_item3);
-    
-    // state: [(1, 2), [-, -], [-, -]]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [(1, 2), [6, 7], [-, -]]
-
-    c_item4 = consume(&rng_buf);
-    assert(c_item4.ds != NULL);
-    assert(((ds_t *)c_item4.ds)->a == 6);
-    assert(((ds_t *)c_item4.ds)->b == 7);
-    release(&rng_buf, &c_item4);
-    
-    // state: [(1, 2), [-, -], [-, -]]
-    
-    assert(publish(&rng_buf, &item2) == 0);
-    
-    // state: [(1, 2), [-, -], [3, 4]]
-    
-    assert(publish(&rng_buf, &item1) == 0);
-    
-    // state: [(1, 2), [1, 2], [3, 4]]
-    
-    assert(publish(&rng_buf, &item1) == 0);
-    
-    // state: [(1, 2), [1, 2], [1, 2]]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [(1, 2), [6, 7], [1, 2]]
-    
-    // Following the sequence above the 3rd slot (holding [1, 2]) is the oldest
-    // for the available slots. The 1st slot is still being consumed and
-    // therefore not eligible.
-    c_item4 = consume(&rng_buf);
-    assert(c_item4.ds != NULL);
-    assert(((ds_t *)c_item4.ds)->a == 1);
-    assert(((ds_t *)c_item4.ds)->b == 2);
-    
-    entry_t c_item5 = consume(&rng_buf);
-    assert(c_item5.ds != NULL);
-    assert(((ds_t *)c_item5.ds)->a == 6);
-    assert(((ds_t *)c_item5.ds)->b == 7);
-    
-    entry_t c_item6 = consume(&rng_buf);
-    assert(c_item6.ds == NULL);
-    
-    release(&rng_buf, &c_item1);
-    release(&rng_buf, &c_item4);
-    release(&rng_buf, &c_item5);
-    
-    // state: [[-, -], [-, -], [-, -]]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [[6, 7], [-, -], [-, -]]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [[6, 7], [6, 7], [-, -]]
-    
-    assert(publish(&rng_buf, &item1) == 0);
-    
-    // state: [[6, 7], [6, 7], [1, 2]]
-    
-    assert(publish(&rng_buf, &item2) == 0);
-    
-    // state: [[3, 4], [6, 7], [1, 2]]
-    
-    // Following the sequence above the 2nd slot (holding [6, 7]) is the oldest
-    c_item4 = consume(&rng_buf);
-    assert(c_item4.ds != NULL);
-    assert(((ds_t *)c_item4.ds)->a == 6);
-    assert(((ds_t *)c_item4.ds)->b == 7);
-    
-    assert(publish(&rng_buf, &item2) == 0);
-    
-    // state: [[3, 4], (6, 7), [3, 4]]
-    
-    assert(publish(&rng_buf, &item1) == 0);
-    
-    // state: [[1, 2], (6, 7), [3, 4]]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [[1, 2], (6, 7), [6, 7]]
-    
-    // Following the sequence above the 1st slot (holding [1, 2]) is the oldest
-    c_item5 = consume(&rng_buf);
-    assert(c_item5.ds != NULL);
-    assert(((ds_t *)c_item5.ds)->a == 1);
-    assert(((ds_t *)c_item5.ds)->b == 2);
-    
-    assert(publish(&rng_buf, &item2) == 0);
-    
-    // state: [(1, 2), (6, 7), [3, 4]]
-    
-    c_item3 = consume(&rng_buf);
-    assert(c_item3.ds != NULL);
-    assert(((ds_t *)c_item3.ds)->a == 3);
-    assert(((ds_t *)c_item3.ds)->b == 4);
-    
-    // state: [(1, 2), (6, 7), (3, 4)]
-    
-    c_item2 = consume(&rng_buf);
-    assert(c_item2.ds == NULL);
-    
-    release(&rng_buf, &c_item4);
-    release(&rng_buf, &c_item5);
-    
-    c_item2 = consume(&rng_buf);
-    assert(c_item2.ds == NULL);
-    
-    // state: [[-, -], [-, -], (3, 4)]
-    
-    assert(publish(&rng_buf, &item4) == 0);
-    
-    // state: [[-, -], [6, 7], (3, 4)]
-    
-    assert(publish(&rng_buf, &item3) == 0);
-    
-    // state: [[5, 6], [6, 7], (3, 4)]
-    
-    release(&rng_buf, &c_item3);
-    
-    // state: [[5, 6], [6, 7], [-, -]]
-    c_item2 = consume(&rng_buf);
-    assert(c_item2.ds != NULL);
-    assert(((ds_t *)c_item2.ds)->a == 6);
-    assert(((ds_t *)c_item2.ds)->b == 7);
-    
-    destroy_ring_buf(&rng_buf);
+    assert(c_item3.ds == NULL);
+    p_item4 = reserve(&rng_buf);
+    assert(p_item4.ds == NULL);
 }
 
 void test_overwrite_ordering()
@@ -313,61 +153,222 @@ void test_overwrite_ordering()
     rng_buf_t rng_buf;
     init_ring_buf(&rng_buf, 3, sizeof(ds_t));
     
-    ds_t item1;
-    item1.a = 1;
-    item1.b = 2;
+    entry_t p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.ds)->a = -1;
+    ((ds_t*)p_item1.ds)->b = 1;
     
-    ds_t item2;
-    item2.a = 3;
-    item2.b = 4;
+    entry_t p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.ds)->a = -2;
+    ((ds_t*)p_item2.ds)->b = 2;
     
-    ds_t item3;
-    item3.a = 5;
-    item3.b = 6;
+    entry_t p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.ds)->a = -3;
+    ((ds_t*)p_item3.ds)->b = 3;
     
-    ds_t item4;
-    item4.a = 6;
-    item4.b = 7;
+    commit(&rng_buf, &p_item2);
+    commit(&rng_buf, &p_item1);
+            
+    entry_t c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.ds)->a == -2);
+    assert(((ds_t*)c_item1.ds)->b == 2);
+    release(&rng_buf, &c_item1);
     
-    assert(publish(&rng_buf, &item1) == 0);
-    assert(publish(&rng_buf, &item2) == 0);
-    assert(publish(&rng_buf, &item3) == 0);
-    assert(publish(&rng_buf, &item4) == 0);
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -4;
+    ((ds_t*)p_item1.ds)->b = 4;
     
-    entry_t c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 3);
-    assert(((ds_t *)c_item.ds)->b == 4);
-    release(&rng_buf, &c_item);
+    // [(x, x), (-1, -1), [-4, 4]]
     
-    c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 5);
-    assert(((ds_t *)c_item.ds)->b == 6);
-    release(&rng_buf, &c_item);
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -5;
+    ((ds_t*)p_item2.ds)->b = 5;
     
-    c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 6);
-    assert(((ds_t *)c_item.ds)->b == 7);
-    release(&rng_buf, &c_item);
+    // [[-5, -5], (-1, -1), [-4, 4]]
     
-    assert(publish(&rng_buf, &item1) == 0);
+    commit(&rng_buf, &p_item1); 
+   // [[-5, -5], (-1, -1), (-4, 4)]
     
-    c_item = consume(&rng_buf);
-    assert(c_item.ds != NULL);
-    assert(((ds_t *)c_item.ds)->a == 1);
-    assert(((ds_t *)c_item.ds)->b == 2);
-    release(&rng_buf, &c_item);
+    commit(&rng_buf, &p_item3);
+    // [(-3, -3), (-1, -1), (-4, -4)]
+        
+    commit(&rng_buf, &p_item2);
+    // [(-3, 3), (-5, 5), (-4, 4)]
+        
+    c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.ds)->a == -4);
+    assert(((ds_t*)c_item1.ds)->b == 4);
+    // [(-3, 3), (-5, 5), [-4, -4]]
     
-    destroy_ring_buf(&rng_buf);
+    p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.ds)->a = -6;
+    ((ds_t*)p_item3.ds)->b = 6;
+    
+    commit(&rng_buf, &p_item3);
+    // [x, (-5, 5), [-6, -6]]
+    
+    entry_t c_item2 = consume(&rng_buf);
+    assert(((ds_t*)c_item2.ds)->a == -5);
+    assert(((ds_t*)c_item2.ds)->b == 5);
+    // [(-6, -6), [-5, 5], [-4, -4]]
+    
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -7;
+    ((ds_t*)p_item2.ds)->b = 7;
+    commit(&rng_buf, &p_item2);
+    
+    // [(-7, -7), x, x]
+        
+    entry_t c_item3 = consume(&rng_buf);
+    assert(((ds_t*)c_item3.ds)->a == -7);
+    assert(((ds_t*)c_item3.ds)->b == 7);
+    // [x, x, x]
+    
+    entry_t p_item4 = reserve(&rng_buf);
+    assert(p_item4.ds == NULL);
+    
+    release(&rng_buf, &c_item2);
+    // [[], x, x]
+
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -8;
+    ((ds_t*)p_item2.ds)->b = 8;
+    commit(&rng_buf, &p_item2);
+    
+    // [x, (-8, -8), x]
+    
+    c_item2 = consume(&rng_buf);
+    assert(((ds_t*)c_item2.ds)->a == -8);
+    assert(((ds_t*)c_item2.ds)->b == 8);
+    // [x, x, x]
+    
+    release(&rng_buf, &c_item3);    
+    release(&rng_buf, &c_item1);
+    
+    entry_t c_item4 = consume(&rng_buf);
+    assert(c_item4.ds == NULL);
+    
+    // [[], [], x]
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -9;
+    ((ds_t*)p_item1.ds)->b = 9;
+    // [[], x, x]
+        
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -10;
+    ((ds_t*)p_item2.ds)->b = 10;
+    // [x, x, x]
+        
+    commit(&rng_buf, &p_item1);
+    // [x, x, (-9, 9)]
+    
+    c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.ds)->a == -9);
+    assert(((ds_t*)c_item1.ds)->b == 9);
+    // [x, x, x]
+    
+    c_item3 = consume(&rng_buf);
+    assert(c_item3.ds == NULL);
+    
+    commit(&rng_buf, &p_item2);
+    
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -11;
+    ((ds_t*)p_item2.ds)->b = 11;
+    commit(&rng_buf, &p_item2);
+    
+    // [x, [-11, 11], x]
+    
+    release(&rng_buf, &c_item1);
+    release(&rng_buf, &c_item2);
+    
+    // [[], [-11, 11], []]
+    
+    c_item3 = consume(&rng_buf);
+    assert(c_item3.ds != NULL);
+    assert(((ds_t*)c_item3.ds)->a == -11);
+    assert(((ds_t*)c_item3.ds)->b == 11);
+    
+    // [[], x, []]
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -12;
+    ((ds_t*)p_item1.ds)->b = 12;
+    commit(&rng_buf, &p_item1);
+    
+    p_item2 = reserve(&rng_buf);
+    assert(p_item2.ds != NULL);
+    ((ds_t*)p_item2.ds)->a = -13;
+    ((ds_t*)p_item2.ds)->b = 13;
+    commit(&rng_buf, &p_item2);
+    
+    // [[-13, 13], x, [-12, 12]]
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -14;
+    ((ds_t*)p_item1.ds)->b = 14;
+    commit(&rng_buf, &p_item1);
+    
+    // [[-13, 13], [-14, 14], x]
+    
+    c_item2 = consume(&rng_buf);
+    assert(((ds_t*)c_item2.ds)->a == -13);
+    assert(((ds_t*)c_item2.ds)->b == 13);
+    
+    release(&rng_buf, &c_item3);
+    release(&rng_buf, &c_item2);
+    
+    c_item2 = consume(&rng_buf);
+    assert(c_item2.ds != NULL);
+    assert(((ds_t*)c_item2.ds)->a == -14);
+    assert(((ds_t*)c_item2.ds)->b == 14);
+    
+    c_item3 = consume(&rng_buf);
+    assert(c_item3.ds == NULL);
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -15;
+    ((ds_t*)p_item1.ds)->b = 15;
+    commit(&rng_buf, &p_item1);
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -16;
+    ((ds_t*)p_item1.ds)->b = 16;
+    commit(&rng_buf, &p_item1);
+    
+    p_item1 = reserve(&rng_buf);
+    assert(p_item1.ds != NULL);
+    ((ds_t*)p_item1.ds)->a = -17;
+    ((ds_t*)p_item1.ds)->b = 17;
+    commit(&rng_buf, &p_item1);
+    
+    c_item1 = consume(&rng_buf);
+    assert(c_item1.ds != NULL);
+    assert(((ds_t*)c_item1.ds)->a == -16);
+    assert(((ds_t*)c_item1.ds)->b == 16);
+    
+    c_item3 = consume(&rng_buf);
+    assert(c_item3.ds != NULL);
+    assert(((ds_t*)c_item3.ds)->a == -17);
+    assert(((ds_t*)c_item3.ds)->b == 17);
 }
 
 int main()
 {
     test_basic();
-    test_2();
-    test_3();
+    test_commit_ordering();
+    test_reserve();
     test_overwrite_ordering();
     
     return 0;

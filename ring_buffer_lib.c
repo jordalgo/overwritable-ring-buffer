@@ -42,139 +42,154 @@ int bs_unset(bitset_t *bs, size_t idx){
     return 0;
 }
 
-void advance_consumer(rng_buf_t * rng_buf)
-{
-    if (rng_buf->consumer_pos == (rng_buf->entries - 1)) {
-        rng_buf->consumer_pos = 0;
-        rng_buf->consumer_ptr = rng_buf->buf;
-    } else {
-        ++rng_buf->consumer_pos;
-        rng_buf->consumer_ptr += rng_buf->entry_size;
-    }
-}
-
 void find_next_consumer_pos(rng_buf_t * rng_buf)
 {
-    if (rng_buf->nr_can_consume == 0) {
-        return;
+    int i = 0;
+    int memory_idx;
+    while (i < rng_buf->nr_entries) {
+        if (++rng_buf->consumer_pos >= rng_buf->nr_entries) {
+            rng_buf->consumer_pos = 0;
+        }
+        memory_idx = rng_buf->queue[rng_buf->consumer_pos];
+        if (memory_idx != -1
+            && bs_is_set(&rng_buf->committed, memory_idx)) {
+            return;
+        }
+        ++i;
     }
     
-    int i = 0;
-    while (i < rng_buf->entries) {
-        advance_consumer(rng_buf);
-        if (bs_is_set(&rng_buf->consumed, rng_buf->consumer_pos)) {
-            ++i;
-        } else {
-            break;
-        }
-    }
-}
-
-void advance_producer(rng_buf_t * rng_buf)
-{
-    if (rng_buf->producer_pos == (rng_buf->entries - 1)) {
-        rng_buf->producer_pos = 0;
-        rng_buf->producer_ptr = rng_buf->buf;
-    } else {
-        ++rng_buf->producer_pos;
-        rng_buf->producer_ptr += rng_buf->entry_size;
-    }
+    // Couldn't find a slot to consume (reset to producer pos)
+    rng_buf->consumer_pos = rng_buf->producer_pos;
 }
 
 void find_next_producer_pos(rng_buf_t * rng_buf)
 {
-    if (rng_buf->nr_can_consume == 0) {
-        return;
-    }
-    
     int i = 0;
-    while (i < rng_buf->entries) {
-        advance_producer(rng_buf);
-        if (bs_is_set(&rng_buf->consumed, rng_buf->producer_pos)) {
-            ++i;
-        } else {
+    int memory_idx;
+    while (i < rng_buf->nr_entries) {
+        if (++rng_buf->producer_pos >= rng_buf->nr_entries) {
+            rng_buf->producer_pos = 0;
+        }
+        if (rng_buf->queue[rng_buf->producer_pos] > -1) {
             break;
         }
+        ++i;
     }
 }
 
 entry_t consume(rng_buf_t * rng_buf)
 {
-    entry_t ret;
+    entry_t ret = {.memory_idx = -1, .ds = NULL};
     
-    if (!bs_is_set(&rng_buf->populated, rng_buf->consumer_pos)
-        || bs_is_set(&rng_buf->consumed, rng_buf->consumer_pos))
-    {
-        ret.consumed_idx = -1;
-        ret.ds = NULL;
+    // if (rng_buf->consumer_pos == -1) {
+    //     return ret;
+    // }
+    
+    int memory_idx = rng_buf->queue[rng_buf->consumer_pos];
+    
+    if (memory_idx == -1 || !bs_is_set(&rng_buf->committed, memory_idx)) {
         return ret;
     }
     
-    bs_set(&rng_buf->consumed, rng_buf->consumer_pos);
-    if (rng_buf->nr_can_consume > 0) {
-        --rng_buf->nr_can_consume;
-    }
-    ret.consumed_idx = rng_buf->consumer_pos;
-    ret.ds = rng_buf->consumer_ptr;
+    ret.memory_idx = memory_idx;
+    
+    rng_buf->queue[rng_buf->consumer_pos] = -1;
+    bs_unset(&rng_buf->committed, memory_idx);
+    ret.ds = &rng_buf->buf[ret.memory_idx * rng_buf->entry_size];
+    
     find_next_consumer_pos(rng_buf);
-    if (bs_is_set(&rng_buf->consumed, rng_buf->producer_pos)) {
-        find_next_producer_pos(rng_buf);
+        
+    return ret;   
+}
+
+void release(rng_buf_t * rng_buf, entry_t * entry)
+{
+    if (entry->memory_idx == -1) {
+        printf("Error: entry is already released\n");
+        return;
+    }
+    
+    int i = 0;
+    for ( ; i < rng_buf->nr_entries; i++) {
+        if (rng_buf->queue[i] == -1) {
+            rng_buf->queue[i] = entry->memory_idx;
+            break;
+        }
+    }
+    // should have found an empty slot
+    assert(i < rng_buf->nr_entries);
+    entry->memory_idx = -1;
+    entry->ds = NULL;
+}
+
+entry_t reserve(rng_buf_t * rng_buf)
+{
+    entry_t ret = {.memory_idx = -1, .ds = NULL};
+    
+    int i = 0;
+    int current_pos = rng_buf->producer_pos;
+    int memory_idx;
+    
+    while (i < rng_buf->nr_entries) {
+        memory_idx = rng_buf->queue[current_pos];
+        if (memory_idx > -1) {
+            rng_buf->queue[current_pos] = -1;
+            ret.memory_idx = memory_idx;
+            ret.ds = &rng_buf->buf[memory_idx * rng_buf->entry_size];
+            if (current_pos == rng_buf->consumer_pos) {
+                find_next_consumer_pos(rng_buf);
+            }
+            return ret;
+        }
+        if (++current_pos >= rng_buf->nr_entries){
+            current_pos = 0;
+        }
+        
+        ++i;
     }
     
     return ret;
 }
 
-void release(rng_buf_t * rng_buf, entry_t *entry)
+void commit(rng_buf_t * rng_buf, entry_t * entry)
 {
-    bs_unset(&rng_buf->consumed, entry->consumed_idx);
-    bs_unset(&rng_buf->populated, entry->consumed_idx);
-    ++rng_buf->nr_can_consume;
-    ++rng_buf->nr_available;
+    int current_memory_idx = rng_buf->queue[rng_buf->producer_pos];
+    bool overwriting = (current_memory_idx > -1 && bs_is_set(&rng_buf->committed, current_memory_idx));
+    rng_buf->queue[rng_buf->producer_pos] = entry->memory_idx;
     
-    if (rng_buf->nr_can_consume == 1) {
-        find_next_consumer_pos(rng_buf);
-        find_next_producer_pos(rng_buf);
-    }
-}
-
-int publish(rng_buf_t * rng_buf, void * ds)
-{
-    if (bs_is_set(&rng_buf->consumed, rng_buf->producer_pos)) {
-        return -1;
-    }
+    bs_set(&rng_buf->committed, entry->memory_idx);
     
-    bs_set(&rng_buf->populated, rng_buf->producer_pos);
-    memcpy(rng_buf->producer_ptr, ds, rng_buf->entry_size);
-    
-    if (rng_buf->nr_available == 0) {
+    if (overwriting && rng_buf->producer_pos == rng_buf->consumer_pos) {
         find_next_consumer_pos(rng_buf);
     }
-    find_next_producer_pos(rng_buf);
     
-    if (rng_buf->nr_available > 0) {
-        --rng_buf->nr_available;
+    if (++rng_buf->producer_pos >= rng_buf->nr_entries) {
+        rng_buf->producer_pos = 0;
     }
-    
-    return 0;
+
+    entry->memory_idx = -1;
+    entry->ds = NULL;
 }
 
-void init_ring_buf(rng_buf_t * rng_buf, int num_entries, size_t entry_size)
+
+void init_ring_buf(rng_buf_t * rng_buf, int nr_entries, size_t entry_size)
 {
-    rng_buf->buf = (void *)malloc(num_entries * entry_size);
-    rng_buf->entries = num_entries;
+    rng_buf->buf = (void *)malloc(nr_entries * entry_size);
+    rng_buf->nr_entries = nr_entries;
     rng_buf->entry_size = entry_size;
-    rng_buf->nr_can_consume = num_entries;
-    rng_buf->nr_available = num_entries;
+    rng_buf->queue = (int *)malloc(nr_entries * sizeof(int));
     rng_buf->consumer_pos = 0;
-    bs_init(&rng_buf->consumed, num_entries);
-    bs_init(&rng_buf->populated, num_entries);
-    
-    rng_buf->consumer_ptr = rng_buf->buf;
     rng_buf->producer_pos = 0;
-    rng_buf->producer_ptr = rng_buf->buf;
+    bs_init(&rng_buf->committed, nr_entries);
+    
+    int i = 0;
+    for (i = 0; i < nr_entries; i++) {
+        rng_buf->queue[i] = i;
+    }
 }
 
 void destroy_ring_buf(rng_buf_t * rng_buf)
 {
     free(rng_buf->buf);
+    free(rng_buf->queue);
 }
