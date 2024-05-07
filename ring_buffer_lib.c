@@ -81,10 +81,6 @@ entry_t consume(rng_buf_t * rng_buf)
 {
     entry_t ret = {.memory_idx = -1, .ds = NULL};
     
-    // if (rng_buf->consumer_pos == -1) {
-    //     return ret;
-    // }
-    
     int memory_idx = rng_buf->queue[rng_buf->consumer_pos];
     
     if (memory_idx == -1 || !bs_is_set(&rng_buf->committed, memory_idx)) {
