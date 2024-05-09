@@ -79,7 +79,7 @@ void find_next_producer_pos(rng_buf_t * rng_buf)
 
 entry_t consume(rng_buf_t * rng_buf)
 {
-    entry_t ret = {.memory_idx = -1, .ds = NULL};
+    entry_t ret = {.memory_idx = -1, .slot = NULL};
     
     int memory_idx = rng_buf->queue[rng_buf->consumer_pos];
     
@@ -91,7 +91,7 @@ entry_t consume(rng_buf_t * rng_buf)
     
     rng_buf->queue[rng_buf->consumer_pos] = -1;
     bs_unset(&rng_buf->committed, memory_idx);
-    ret.ds = &rng_buf->buf[ret.memory_idx * rng_buf->entry_size];
+    ret.slot = &rng_buf->buf[ret.memory_idx * rng_buf->entry_size];
     
     find_next_consumer_pos(rng_buf);
         
@@ -115,12 +115,12 @@ void release(rng_buf_t * rng_buf, entry_t * entry)
     // should have found an empty slot
     assert(i < rng_buf->nr_entries);
     entry->memory_idx = -1;
-    entry->ds = NULL;
+    entry->slot = NULL;
 }
 
 entry_t reserve(rng_buf_t * rng_buf)
 {
-    entry_t ret = {.memory_idx = -1, .ds = NULL};
+    entry_t ret = {.memory_idx = -1, .slot = NULL};
     
     int i = 0;
     int current_pos = rng_buf->producer_pos;
@@ -131,7 +131,7 @@ entry_t reserve(rng_buf_t * rng_buf)
         if (memory_idx > -1) {
             rng_buf->queue[current_pos] = -1;
             ret.memory_idx = memory_idx;
-            ret.ds = &rng_buf->buf[memory_idx * rng_buf->entry_size];
+            ret.slot = &rng_buf->buf[memory_idx * rng_buf->entry_size];
             if (current_pos == rng_buf->consumer_pos) {
                 find_next_consumer_pos(rng_buf);
             }
@@ -164,7 +164,7 @@ void commit(rng_buf_t * rng_buf, entry_t * entry)
     }
 
     entry->memory_idx = -1;
-    entry->ds = NULL;
+    entry->slot = NULL;
 }
 
 

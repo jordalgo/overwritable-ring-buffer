@@ -16,7 +16,7 @@ typedef struct {
 
 typedef struct {
     int memory_idx;
-    void * ds;
+    void * slot;
 } entry_t;
 
 entry_t consume(rng_buf_t * rng_buf);
