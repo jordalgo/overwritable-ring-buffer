@@ -33,8 +33,8 @@ void print_rng_buf_state(rng_buf_t* rng_buf) {
         }
     }
     printf("\n");
-    printf("Producer pos %d\n", rng_buf->producer_pos);
-    printf("Consumer pos %d\n", rng_buf->consumer_pos);
+    printf("Producer pos %lu\n", rng_buf->producer_pos);
+    printf("Consumer pos %lu\n", rng_buf->consumer_pos);
     printf("\n");
 }
 
@@ -63,6 +63,50 @@ void test_basic()
 
     release(&rng_buf, &c_item);
     assert(c_item.slot == NULL);
+}
+
+void test_complex_struct()
+{
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(task_t));
+    
+    entry_t p_item = reserve(&rng_buf);
+    assert(p_item.slot != NULL);
+    
+    memcpy(&((task_t*)p_item.slot)->comm, "hello", 16);
+    ((task_t*)p_item.slot)->pid = 123;
+    ((task_t*)p_item.slot)->tid = 456;
+    commit(&rng_buf, &p_item);
+     
+    entry_t c_item = consume(&rng_buf);
+    assert(c_item.slot != NULL);
+    assert(strcmp(((task_t*)c_item.slot)->comm, "hello") == 0);
+    assert(((task_t*)c_item.slot)->pid == 123);
+    assert(((task_t*)c_item.slot)->tid == 456);
+}
+
+void test_destroy()
+{
+    rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 3, sizeof(ds_t));
+    
+    entry_t p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.slot)->a = -1;
+    commit(&rng_buf, &p_item1);
+    
+    entry_t p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.slot)->a = -2;
+    commit(&rng_buf, &p_item2);
+    
+    entry_t p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.slot)->a = -3;
+    commit(&rng_buf, &p_item3);
+    
+    destroy_ring_buf(&rng_buf);
+    
+    assert(rng_buf.buf == NULL);
+    assert(rng_buf.queue == NULL);
+    assert(rng_buf.committed.data == NULL);
 }
 
 void test_commit_ordering()
@@ -406,6 +450,8 @@ void test_longer_buffer()
 int main()
 {
     test_basic();
+    test_complex_struct();
+    test_destroy();
     test_commit_ordering();
     test_reserve();
     test_overwrite_ordering();

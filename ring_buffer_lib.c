@@ -16,6 +16,11 @@ void bs_init(bitset_t *bs, size_t n) {
     bs->num_bits = n;
 }
 
+void bs_free(bitset_t *bs) {
+    free(bs->data);
+    bs->data = NULL;
+}
+
 bool bs_is_set(bitset_t *bs, size_t idx) {
     assert(idx < bs->num_bits);
     size_t byte_idx = idx / BITS_PER_BYTE;
@@ -44,9 +49,9 @@ int bs_unset(bitset_t *bs, size_t idx){
 
 void find_next_consumer_pos(rng_buf_t * rng_buf)
 {
-    int i = 0;
     int memory_idx;
-    while (i < rng_buf->nr_entries) {
+
+    for (int i = 0; i < rng_buf->nr_entries; ++i) {
         if (++rng_buf->consumer_pos >= rng_buf->nr_entries) {
             rng_buf->consumer_pos = 0;
         }
@@ -55,26 +60,10 @@ void find_next_consumer_pos(rng_buf_t * rng_buf)
             && bs_is_set(&rng_buf->committed, memory_idx)) {
             return;
         }
-        ++i;
     }
     
     // Couldn't find a slot to consume (reset to producer pos)
     rng_buf->consumer_pos = rng_buf->producer_pos;
-}
-
-void find_next_producer_pos(rng_buf_t * rng_buf)
-{
-    int i = 0;
-    int memory_idx;
-    while (i < rng_buf->nr_entries) {
-        if (++rng_buf->producer_pos >= rng_buf->nr_entries) {
-            rng_buf->producer_pos = 0;
-        }
-        if (rng_buf->queue[rng_buf->producer_pos] > -1) {
-            break;
-        }
-        ++i;
-    }
 }
 
 entry_t consume(rng_buf_t * rng_buf)
@@ -104,7 +93,7 @@ void release(rng_buf_t * rng_buf, entry_t * entry)
         printf("Error: entry is already released\n");
         return;
     }
-    
+
     int i = 0;
     for ( ; i < rng_buf->nr_entries; i++) {
         if (rng_buf->queue[i] == -1) {
@@ -122,11 +111,10 @@ entry_t reserve(rng_buf_t * rng_buf)
 {
     entry_t ret = {.memory_idx = -1, .slot = NULL};
     
-    int i = 0;
     int current_pos = rng_buf->producer_pos;
     int memory_idx;
     
-    while (i < rng_buf->nr_entries) {
+    for (int i = 0; i < rng_buf->nr_entries; ++i) {
         memory_idx = rng_buf->queue[current_pos];
         if (memory_idx > -1) {
             rng_buf->queue[current_pos] = -1;
@@ -140,8 +128,6 @@ entry_t reserve(rng_buf_t * rng_buf)
         if (++current_pos >= rng_buf->nr_entries){
             current_pos = 0;
         }
-        
-        ++i;
     }
     
     return ret;
@@ -149,10 +135,15 @@ entry_t reserve(rng_buf_t * rng_buf)
 
 void commit(rng_buf_t * rng_buf, entry_t * entry)
 {
+    if (entry->memory_idx == -1) {
+        printf("Error: entry is invalid\n");
+        return;
+    }
+    
     int current_memory_idx = rng_buf->queue[rng_buf->producer_pos];
     bool overwriting = (current_memory_idx > -1 && bs_is_set(&rng_buf->committed, current_memory_idx));
-    rng_buf->queue[rng_buf->producer_pos] = entry->memory_idx;
     
+    rng_buf->queue[rng_buf->producer_pos] = entry->memory_idx;
     bs_set(&rng_buf->committed, entry->memory_idx);
     
     if (overwriting && rng_buf->producer_pos == rng_buf->consumer_pos) {
@@ -168,7 +159,7 @@ void commit(rng_buf_t * rng_buf, entry_t * entry)
 }
 
 
-void init_ring_buf(rng_buf_t * rng_buf, int nr_entries, size_t entry_size)
+void init_ring_buf(rng_buf_t * rng_buf, unsigned long nr_entries, size_t entry_size)
 {
     rng_buf->buf = (void *)malloc(nr_entries * entry_size);
     rng_buf->nr_entries = nr_entries;
@@ -187,5 +178,8 @@ void init_ring_buf(rng_buf_t * rng_buf, int nr_entries, size_t entry_size)
 void destroy_ring_buf(rng_buf_t * rng_buf)
 {
     free(rng_buf->buf);
+    rng_buf->buf = NULL;
     free(rng_buf->queue);
+    rng_buf->queue = NULL;
+    bs_free(&rng_buf->committed);
 }
