@@ -324,12 +324,92 @@ void test_overwrite_ordering()
     assert(((ds_t*)c_item3.slot)->a == -17);
 }
 
+void test_longer_buffer()
+{
+     rng_buf_t rng_buf;
+    init_ring_buf(&rng_buf, 5, sizeof(ds_t));
+    
+    entry_t p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.slot)->a = -1;
+    commit(&rng_buf, &p_item1);
+    
+    entry_t p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.slot)->a = -2;
+    commit(&rng_buf, &p_item2);
+    
+    entry_t p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.slot)->a = -3;
+    commit(&rng_buf, &p_item3);
+    
+    entry_t p_item4 = reserve(&rng_buf);
+    ((ds_t*)p_item4.slot)->a = -4;
+    commit(&rng_buf, &p_item4);
+    
+    entry_t p_item5 = reserve(&rng_buf);
+    ((ds_t*)p_item5.slot)->a = -5;
+    commit(&rng_buf, &p_item5);
+    
+    p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.slot)->a = -6;
+    commit(&rng_buf, &p_item1);
+    
+    p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.slot)->a = -7;
+    commit(&rng_buf, &p_item2);
+    
+    p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.slot)->a = -8;
+    commit(&rng_buf, &p_item3);
+    
+    p_item4 = reserve(&rng_buf);
+    ((ds_t*)p_item4.slot)->a = -9;
+    commit(&rng_buf, &p_item4);
+    
+    entry_t c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.slot)->a == -5);
+    release(&rng_buf, &c_item1);
+    
+    p_item1 = reserve(&rng_buf);
+    ((ds_t*)p_item1.slot)->a = -10;
+    
+    p_item2 = reserve(&rng_buf);
+    ((ds_t*)p_item2.slot)->a = -11;
+    
+    c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.slot)->a == -7);
+    
+    p_item3 = reserve(&rng_buf);
+    ((ds_t*)p_item3.slot)->a = -12;
+    commit(&rng_buf, &p_item3);
+    
+    p_item4 = reserve(&rng_buf);
+    ((ds_t*)p_item4.slot)->a = -13;
+    commit(&rng_buf, &p_item4);
+    
+    entry_t c_item2 = consume(&rng_buf);
+    assert(((ds_t*)c_item2.slot)->a == -12);
+    
+    p_item5 = reserve(&rng_buf);
+    ((ds_t*)p_item5.slot)->a = -14;
+    commit(&rng_buf, &p_item5);
+    
+    release(&rng_buf, &c_item1);
+    
+    p_item4 = reserve(&rng_buf);
+    ((ds_t*)p_item4.slot)->a = -15;
+    commit(&rng_buf, &p_item4);
+    
+    c_item1 = consume(&rng_buf);
+    assert(((ds_t*)c_item1.slot)->a == -14);
+}
+
 int main()
 {
     test_basic();
     test_commit_ordering();
     test_reserve();
     test_overwrite_ordering();
+    test_longer_buffer();
     
     return 0;
 }
